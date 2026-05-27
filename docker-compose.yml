@@ -1,0 +1,15 @@
+services:
+  birthday-cabin:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CABIN_PASSWORD: ${CABIN_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET}
+      DATA_DIR: /data
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - ./data:/data
