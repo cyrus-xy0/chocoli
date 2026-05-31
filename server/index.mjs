@@ -18,5 +18,5 @@ const app = createApp({
 });
 
 app.listen(port, () => {
-  console.log(`生日小屋已启动: http://localhost:${port}`);
+  console.log(`生活小屋已启动: http://localhost:${port}`);
 });

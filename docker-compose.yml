@@ -1,5 +1,5 @@
 services:
-  birthday-cabin:
+  life-cabin:
     build: .
     restart: unless-stopped
     ports:

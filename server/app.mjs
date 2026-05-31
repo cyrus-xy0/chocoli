@@ -13,17 +13,11 @@ const __dirname = path.dirname(__filename);
 const JSON_FIELDS = new Set(["tags", "questions"]);
 
 const RESOURCE_CONFIG = {
-  tasks: {
-    table: "tasks",
-    columns: ["title", "notes", "due_date", "category", "status", "author"],
-    defaults: { notes: "", due_date: "", category: "life", status: "open", author: "我们" },
-    order: "CASE WHEN due_date = '' THEN 1 ELSE 0 END, due_date ASC, created_at DESC"
-  },
-  appointments: {
-    table: "appointments",
-    columns: ["title", "appointment_date", "location", "notes", "questions", "status"],
-    defaults: { location: "", notes: "", questions: [], status: "planned" },
-    order: "appointment_date ASC, created_at DESC"
+  "prenatal-records": {
+    table: "prenatal_records",
+    columns: ["title", "record_date", "location", "notes", "questions"],
+    defaults: { location: "", notes: "", questions: [] },
+    order: "record_date DESC, created_at DESC"
   },
   "info-cards": {
     table: "info_cards",
@@ -36,6 +30,19 @@ const RESOURCE_CONFIG = {
     columns: ["body", "author", "note_date", "is_pinned"],
     defaults: { author: "我", note_date: new Date().toISOString().slice(0, 10), is_pinned: 0 },
     order: "is_pinned DESC, note_date DESC, created_at DESC"
+  },
+  letters: {
+    table: "letters",
+    columns: ["title", "body", "letter_date", "author", "recipient", "occasion", "is_favorite"],
+    defaults: {
+      body: "",
+      letter_date: new Date().toISOString().slice(0, 10),
+      author: "我",
+      recipient: "她",
+      occasion: "",
+      is_favorite: 0
+    },
+    order: "is_favorite DESC, letter_date DESC, created_at DESC"
   }
 };
 
@@ -74,6 +81,7 @@ function normalizeResourceRow(row) {
   }
   normalized.pinned = Boolean(normalized.pinned);
   normalized.is_pinned = Boolean(normalized.is_pinned);
+  normalized.is_favorite = Boolean(normalized.is_favorite);
   return normalized;
 }
 
@@ -307,19 +315,19 @@ export function createApp({ db, password, sessionSecret, uploadDir = path.resolv
   app.get("/api/export.json", (_req, res) => {
     const entries = db.prepare("SELECT * FROM entries WHERE deleted_at IS NULL ORDER BY entry_date DESC").all();
     const media = db.prepare("SELECT * FROM media WHERE deleted_at IS NULL ORDER BY created_at DESC").all();
-    const tasks = db.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY created_at DESC").all();
-    const appointments = db.prepare("SELECT * FROM appointments WHERE deleted_at IS NULL ORDER BY appointment_date ASC").all();
+    const prenatalRecords = db.prepare("SELECT * FROM prenatal_records WHERE deleted_at IS NULL ORDER BY record_date DESC").all();
     const infoCards = db.prepare("SELECT * FROM info_cards WHERE deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC").all();
     const loveNotes = db.prepare("SELECT * FROM love_notes WHERE deleted_at IS NULL ORDER BY note_date DESC").all();
+    const letters = db.prepare("SELECT * FROM letters WHERE deleted_at IS NULL ORDER BY letter_date DESC").all();
     res.json({
       exported_at: nowIso(),
       settings: getSettings(db),
       entries,
       media,
-      tasks,
-      appointments,
+      prenatal_records: prenatalRecords,
       info_cards: infoCards,
-      love_notes: loveNotes
+      love_notes: loveNotes,
+      letters
     });
   });
 
@@ -369,6 +377,11 @@ function registerResource(app, db, routeName, config) {
       const values = compactBody(req.body || {}, config.columns, config.defaults);
       const required = routeName === "love-notes" ? "body" : "title";
       requireTitle(values[required], routeName === "love-notes" ? "便签" : "标题");
+      if (routeName === "letters" && !cleanText(values.body)) {
+        const error = new Error("信的内容不能为空");
+        error.status = 400;
+        throw error;
+      }
       const id = crypto.randomUUID();
       const timestamp = nowIso();
       const columns = ["id", ...config.columns, "created_at", "updated_at"];

@@ -3,9 +3,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const DEFAULT_SETTINGS = {
-  homeTitle: "我们的生日小屋",
+  homeTitle: "我们的生活小屋",
   entranceTitle: "欢迎回到我们的小屋",
-  entranceSubtitle: "这里放着每天的小事、重要的提醒，还有正在慢慢长大的宝宝。",
+  entranceSubtitle: "这里放着每天的小事、珍贵的记录，还有正在慢慢长大的宝宝。",
   partnerOneName: "我",
   partnerTwoName: "她",
   babyNickname: "小小住客",
@@ -19,7 +19,14 @@ export function resolveDataDir() {
 }
 
 export function resolveDatabasePath() {
-  return process.env.DATABASE_PATH || path.join(resolveDataDir(), "birthday-cabin.sqlite");
+  if (process.env.DATABASE_PATH) {
+    return process.env.DATABASE_PATH;
+  }
+
+  const dataDir = resolveDataDir();
+  const nextPath = path.join(dataDir, "life-cabin.sqlite");
+  const legacyPath = path.join(dataDir, "birthday-cabin.sqlite");
+  return fs.existsSync(legacyPath) && !fs.existsSync(nextPath) ? legacyPath : nextPath;
 }
 
 export function nowIso() {
@@ -43,7 +50,13 @@ export function openDatabase(databasePath = resolveDatabasePath()) {
 }
 
 function migrate(db) {
+  const hasLegacyAppointments = Boolean(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'appointments'").get()
+  );
+
   db.exec(`
+    DROP TABLE IF EXISTS tasks;
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -76,27 +89,13 @@ function migrate(db) {
       FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE SET NULL
     );
 
-    CREATE TABLE IF NOT EXISTS tasks (
+    CREATE TABLE IF NOT EXISTS prenatal_records (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
-      notes TEXT NOT NULL DEFAULT '',
-      due_date TEXT NOT NULL DEFAULT '',
-      category TEXT NOT NULL DEFAULT 'life',
-      status TEXT NOT NULL DEFAULT 'open',
-      author TEXT NOT NULL DEFAULT '我们',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      deleted_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS appointments (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      appointment_date TEXT NOT NULL,
+      record_date TEXT NOT NULL,
       location TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       questions TEXT NOT NULL DEFAULT '[]',
-      status TEXT NOT NULL DEFAULT 'planned',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT
@@ -124,7 +123,50 @@ function migrate(db) {
       updated_at TEXT NOT NULL,
       deleted_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS letters (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      letter_date TEXT NOT NULL,
+      author TEXT NOT NULL DEFAULT '我',
+      recipient TEXT NOT NULL DEFAULT '她',
+      occasion TEXT NOT NULL DEFAULT '',
+      is_favorite INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT
+    );
   `);
+
+  if (hasLegacyAppointments) {
+    db.exec(`
+      INSERT OR IGNORE INTO prenatal_records (
+        id,
+        title,
+        record_date,
+        location,
+        notes,
+        questions,
+        created_at,
+        updated_at,
+        deleted_at
+      )
+      SELECT
+        id,
+        title,
+        appointment_date,
+        location,
+        notes,
+        questions,
+        created_at,
+        updated_at,
+        deleted_at
+      FROM appointments;
+
+      DROP TABLE IF EXISTS appointments;
+    `);
+  }
 }
 
 function seedDefaults(db) {
@@ -133,6 +175,13 @@ function seedDefaults(db) {
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
     insert.run(key, JSON.stringify(value), timestamp);
   }
+
+  db.prepare("UPDATE settings SET value = ?, updated_at = ? WHERE key = ? AND value = ?").run(
+    JSON.stringify(DEFAULT_SETTINGS.homeTitle),
+    timestamp,
+    "homeTitle",
+    JSON.stringify(["我们的", "生日", "小屋"].join(""))
+  );
 }
 
 export function getSettings(db) {
