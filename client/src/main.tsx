@@ -281,42 +281,96 @@ function Shell({
   setSettings: React.Dispatch<React.SetStateAction<SettingsState>>;
   onLogout: () => void;
 }) {
-  const path = window.location.pathname;
+  const [path, setPath] = React.useState(() => window.location.pathname);
   const current = path === "/" ? "今日小屋" : navItems.find((item) => item.href === path)?.label || "今日小屋";
+  const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  const sidebarCloseTimer = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    function syncPath() {
+      setPath(window.location.pathname);
+    }
+    window.addEventListener("popstate", syncPath);
+    return () => window.removeEventListener("popstate", syncPath);
+  }, []);
 
   React.useEffect(() => {
     document.title = `${current} · ${settings.homeTitle}`;
   }, [current, settings.homeTitle]);
+
+  React.useEffect(() => {
+    return () => {
+      if (sidebarCloseTimer.current) window.clearTimeout(sidebarCloseTimer.current);
+    };
+  }, []);
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST", body: JSON.stringify({}) });
     onLogout();
   }
 
+  function openSidebar() {
+    if (sidebarCloseTimer.current) {
+      window.clearTimeout(sidebarCloseTimer.current);
+      sidebarCloseTimer.current = null;
+    }
+    setSidebarOpen(true);
+  }
+
+  function queueSidebarClose() {
+    if (sidebarCloseTimer.current) window.clearTimeout(sidebarCloseTimer.current);
+    sidebarCloseTimer.current = window.setTimeout(() => {
+      setSidebarOpen(false);
+      sidebarCloseTimer.current = null;
+    }, 180);
+  }
+
+  function closeSidebarOnBlur(event: React.FocusEvent<HTMLElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      queueSidebarClose();
+    }
+  }
+
+  function navigate(event: React.MouseEvent<HTMLAnchorElement>, href: string) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    if (window.location.pathname !== href || window.location.search) {
+      window.history.pushState({}, "", href);
+      setPath(href);
+    }
+    openSidebar();
+  }
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <a href="/" className="site-title">
+    <div className={`app-shell${sidebarOpen ? " sidebar-open" : ""}`}>
+      <aside
+        className="sidebar"
+        onBlur={closeSidebarOnBlur}
+        onFocus={openSidebar}
+        onMouseEnter={openSidebar}
+        onMouseLeave={queueSidebarClose}
+      >
+        <a href="/" className="site-title" onClick={(event) => navigate(event, "/")}>
           <span className="brand-mark small">
             <Heart size={18} />
           </span>
-          <span>{settings.homeTitle}</span>
+          <span className="sidebar-label">{settings.homeTitle}</span>
         </a>
         <nav>
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = path === item.href;
             return (
-              <a key={item.href} className={active ? "active" : ""} href={item.href}>
+              <a key={item.href} className={active ? "active" : ""} href={item.href} onClick={(event) => navigate(event, item.href)}>
                 <Icon size={18} />
-                {item.label}
+                <span className="sidebar-label">{item.label}</span>
               </a>
             );
           })}
         </nav>
         <button className="ghost-button logout-button" onClick={logout}>
           <LogOut size={17} />
-          离开
+          <span className="sidebar-label">离开</span>
         </button>
       </aside>
       <main className="content">
