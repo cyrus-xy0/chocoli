@@ -561,6 +561,34 @@ function Dashboard({ settings }: { settings: SettingsState }) {
 function Letters({ settings }: { settings: SettingsState }) {
   const letters = useAsyncData<Letter[]>(() => api("/api/letters"), [], []);
   const [editing, setEditing] = React.useState(false);
+  const [readingId, setReadingId] = React.useState(() => new URLSearchParams(window.location.search).get("letter"));
+  const readingLetter = readingId ? letters.data.find((letter) => letter.id === readingId) || null : null;
+
+  React.useEffect(() => {
+    function syncReadingId() {
+      setReadingId(new URLSearchParams(window.location.search).get("letter"));
+    }
+    window.addEventListener("popstate", syncReadingId);
+    return () => window.removeEventListener("popstate", syncReadingId);
+  }, []);
+
+  function openLetter(letter: Letter) {
+    setReadingId(letter.id);
+    window.history.pushState({}, "", `/letters?letter=${letter.id}`);
+  }
+
+  function closeReader() {
+    setReadingId(null);
+    window.history.pushState({}, "", "/letters");
+  }
+
+  async function toggleFavorite(letter: Letter) {
+    const updated = await api<Letter>(`/api/letters/${letter.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ is_favorite: !letter.is_favorite })
+    });
+    letters.reload();
+  }
 
   if (editing) {
     return (
@@ -583,6 +611,17 @@ function Letters({ settings }: { settings: SettingsState }) {
     );
   }
 
+  if (readingLetter) {
+    return (
+      <LetterReader
+        letter={readingLetter}
+        settings={settings}
+        onBack={closeReader}
+        onToggleFavorite={() => toggleFavorite(readingLetter)}
+      />
+    );
+  }
+
   return (
     <div className="stack-page">
       <div className="letter-list-head">
@@ -600,37 +639,56 @@ function Letters({ settings }: { settings: SettingsState }) {
       </div>
       <section className="letter-shelf">
         {letters.data.map((letter) => (
-          <article key={letter.id} className={`letter-card${letter.is_favorite ? " favorite" : ""}`}>
-            <div className="letter-card-head">
-              <div>
-                <div className="card-meta">
-                  {formatDate(letter.letter_date)} · {letter.author || settings.partnerOneName || "我"} 写给{" "}
-                  {letter.recipient || settings.partnerTwoName || "她"}
-                </div>
-                <h2>{letter.title}</h2>
+          <article
+            key={letter.id}
+            data-letter-id={letter.id}
+            className={`letter-card${letter.is_favorite ? " favorite" : ""}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`打开信件：${letter.title}`}
+            onClick={() => openLetter(letter)}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                openLetter(letter);
+              }
+            }}
+          >
+            <div className="letter-envelope-face" aria-hidden="true">
+              <div className="letter-stamp">
+                <Mail size={16} />
               </div>
-              <button
-                className="icon-button letter-card-action"
-                type="button"
-                aria-label={letter.is_favorite ? "取消珍藏" : "珍藏这封信"}
-                title={letter.is_favorite ? "取消珍藏" : "珍藏这封信"}
-                onClick={async () => {
-                  await api(`/api/letters/${letter.id}`, {
-                    method: "PUT",
-                    body: JSON.stringify({ is_favorite: !letter.is_favorite })
-                  });
-                  letters.reload();
-                }}
-              >
-                <Star size={18} fill={letter.is_favorite ? "currentColor" : "none"} />
-              </button>
+              <div className="letter-postmark">{formatDate(letter.letter_date)}</div>
             </div>
-            {letter.occasion ? <div className="letter-occasion">{letter.occasion}</div> : null}
-            <p>{letter.body}</p>
-            <footer>
-              <span>{letter.recipient || settings.partnerTwoName || "她"}</span>
-              <cite>{letter.author || settings.partnerOneName || "我"}</cite>
-            </footer>
+            <button
+              className="icon-button letter-card-action"
+              type="button"
+              aria-label={letter.is_favorite ? "取消珍藏" : "珍藏这封信"}
+                title={letter.is_favorite ? "取消珍藏" : "珍藏这封信"}
+              onClick={async (event) => {
+                event.stopPropagation();
+                await toggleFavorite(letter);
+              }}
+            >
+              <Star size={18} fill={letter.is_favorite ? "currentColor" : "none"} />
+            </button>
+            <div className="letter-address">
+              <span>To</span>
+              <strong>{letter.recipient || settings.partnerTwoName || "她"}</strong>
+              <small>{letter.author || settings.partnerOneName || "我"} 写给她</small>
+            </div>
+            <div className="letter-paper-preview">
+              <div className="letter-paper-head">
+                <h2>{letter.title}</h2>
+                {letter.occasion ? <div className="letter-occasion">{letter.occasion}</div> : null}
+              </div>
+              <p>{letter.body}</p>
+              <footer>
+                <span>{formatDate(letter.letter_date)}</span>
+                <cite>{letter.author || settings.partnerOneName || "我"}</cite>
+              </footer>
+            </div>
           </article>
         ))}
         {!letters.data.length ? (
@@ -638,6 +696,64 @@ function Letters({ settings }: { settings: SettingsState }) {
             这里还空着，第一封信会成为小屋里很重要的一页。
           </button>
         ) : null}
+      </section>
+    </div>
+  );
+}
+
+function LetterReader({
+  letter,
+  settings,
+  onBack,
+  onToggleFavorite
+}: {
+  letter: Letter;
+  settings: SettingsState;
+  onBack: () => void;
+  onToggleFavorite: () => void;
+}) {
+  return (
+    <div className="letter-reader-page">
+      <div className="letter-reader-top">
+        <button className="secondary-button" type="button" onClick={onBack}>
+          <ArrowLeft size={17} />
+          收起信纸
+        </button>
+        <button className="secondary-button reader-favorite-button" type="button" onClick={onToggleFavorite}>
+          <Star size={17} fill={letter.is_favorite ? "currentColor" : "none"} />
+          {letter.is_favorite ? "已珍藏" : "珍藏这封信"}
+        </button>
+      </div>
+
+      <section className={`letter-reader-stage${letter.is_favorite ? " favorite" : ""}`} aria-label={`正在读信：${letter.title}`}>
+        <div className="reader-ambient" aria-hidden="true" />
+        <div className="reader-envelope" aria-hidden="true">
+          <div className="reader-envelope-back" />
+          <div className="reader-envelope-flap" />
+          <div className="reader-envelope-left" />
+          <div className="reader-envelope-right" />
+          <div className="reader-envelope-front" />
+          <div className="reader-envelope-seal">
+            <Heart size={18} />
+          </div>
+        </div>
+
+        <article className="reader-paper">
+          <div className="reader-paper-meta">
+            <div>
+              <span>To</span>
+              <strong>{letter.recipient || settings.partnerTwoName || "她"}</strong>
+            </div>
+            <div className="reader-postmark">{formatDate(letter.letter_date)}</div>
+          </div>
+          {letter.occasion ? <div className="reader-occasion">{letter.occasion}</div> : null}
+          <h1>{letter.title}</h1>
+          <p>{letter.body}</p>
+          <footer>
+            <span>From</span>
+            <cite>{letter.author || settings.partnerOneName || "我"}</cite>
+          </footer>
+        </article>
       </section>
     </div>
   );
